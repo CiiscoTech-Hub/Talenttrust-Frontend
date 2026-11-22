@@ -26,6 +26,8 @@ import {
   fetchContractById,
   POLL_INTERVAL_MS,
   PollerOptions,
+  PollErrorInfo,
+  STALE_AFTER_FAILURES,
   startPoller,
 } from '@/lib/poller';
 import { NOTIFICATIONS_KEY } from '@/lib/notifications';
@@ -54,6 +56,9 @@ interface NotificationsContextValue {
   desktopPermission: DesktopNotificationPermission;
   setDesktopEnabled: (enabled: boolean) => Promise<void>;
   toggleDesktopType: (type: WatchEventType) => void;
+  /** True after repeated failed polls, until the user dismisses it or polling recovers. */
+  updatesPaused: boolean;
+  dismissUpdatesPaused: () => void;
 }
 
 const NotificationsContext = createContext<NotificationsContextValue | null>(null);
@@ -69,6 +74,9 @@ export function NotificationsProvider({ children, poller }: NotificationsProvide
   const [announcement, setAnnouncement] = useState('');
   const [desktopSettings, setDesktopSettings] = useState<DesktopNotifySettings>(defaultDesktopSettings);
   const [desktopPermission, setDesktopPermission] = useState<DesktopNotificationPermission>('default');
+  const [stale, setStale] = useState(false);
+  const [staleDismissed, setStaleDismissed] = useState(false);
+  const staleRef = useRef(false);
   const notificationsRef = useRef(notifications);
   notificationsRef.current = notifications;
   const desktopSettingsRef = useRef(desktopSettings);
@@ -134,6 +142,23 @@ export function NotificationsProvider({ children, poller }: NotificationsProvide
         setNotifications(next);
         const last = events[events.length - 1];
         if (last) setAnnouncement(`${last.title}. ${unreadCount(next)} unread.`);
+      },
+      onError: (info: PollErrorInfo) => {
+        poller?.onError?.(info);
+        if (info.consecutiveFailures >= STALE_AFTER_FAILURES) {
+          if (!staleRef.current) {
+            staleRef.current = true;
+            setStale(true);
+            setAnnouncement('Updates paused, retrying.');
+          }
+        }
+      },
+      onRecover: () => {
+        poller?.onRecover?.();
+        // Recovery re-arms the notice for the next outage.
+        staleRef.current = false;
+        setStale(false);
+        setStaleDismissed(false);
       },
       onRemoved: (id: number) => {
         const next = unwatch(id);
@@ -249,6 +274,8 @@ export function NotificationsProvider({ children, poller }: NotificationsProvide
     setDesktopSettings(next);
   }, []);
 
+  const dismissUpdatesPaused = useCallback(() => setStaleDismissed(true), []);
+
   const value = useMemo<NotificationsContextValue>(
     () => ({
       items: notifications.items,
@@ -263,19 +290,10 @@ export function NotificationsProvider({ children, poller }: NotificationsProvide
       desktopPermission,
       setDesktopEnabled,
       toggleDesktopType,
+      updatesPaused: stale && !staleDismissed,
+      dismissUpdatesPaused,
     }),
-    [
-      notifications,
-      watchStore,
-      toggleWatch,
-      doMarkAllRead,
-      doClear,
-      announcement,
-      desktopSettings,
-      desktopPermission,
-      setDesktopEnabled,
-      toggleDesktopType,
-    ],
+    [notifications, watchStore, toggleWatch, doMarkAllRead, doClear, announcement, stale, staleDismissed, dismissUpdatesPaused],
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
