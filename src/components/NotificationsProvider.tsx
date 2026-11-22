@@ -5,8 +5,10 @@ import type { EscrowContract } from '@/lib/api';
 import {
   appendNotification,
   clearNotifications,
+  dismiss,
   loadNotifications,
   markAllRead,
+  markRead,
   NotificationsStore,
   saveNotifications,
   unreadCount,
@@ -50,6 +52,8 @@ interface NotificationsContextValue {
   isWatched: (id: number) => boolean;
   toggleWatch: (contract: EscrowContract) => void;
   markAllRead: () => void;
+  markRead: (id: string) => void;
+  dismiss: (id: string) => void;
   clear: () => void;
   announcement: string;
   desktopSettings: DesktopNotifySettings;
@@ -222,6 +226,24 @@ export function NotificationsProvider({ children, poller }: NotificationsProvide
     setAnnouncement('All notifications marked as read.');
   }, []);
 
+  const doMarkRead = useCallback((id: string) => {
+    const next = markRead(notificationsRef.current, id);
+    if (next === notificationsRef.current) return;
+    saveNotifications(next);
+    notificationsRef.current = next;
+    setNotifications(next);
+    setAnnouncement(`Notification marked as read. ${unreadCount(next)} unread.`);
+  }, []);
+
+  const doDismiss = useCallback((id: string) => {
+    const next = dismiss(notificationsRef.current, id);
+    if (next === notificationsRef.current) return;
+    saveNotifications(next);
+    notificationsRef.current = next;
+    setNotifications(next);
+    setAnnouncement(`Notification dismissed. ${unreadCount(next)} unread.`);
+  }, []);
+
   const doClear = useCallback(() => {
     const next = clearNotifications();
     notificationsRef.current = next;
@@ -284,6 +306,8 @@ export function NotificationsProvider({ children, poller }: NotificationsProvide
       isWatched: (id: number) => watchStore.items.some((i) => i.id === id),
       toggleWatch,
       markAllRead: doMarkAllRead,
+      markRead: doMarkRead,
+      dismiss: doDismiss,
       clear: doClear,
       announcement,
       desktopSettings,
@@ -293,7 +317,7 @@ export function NotificationsProvider({ children, poller }: NotificationsProvide
       updatesPaused: stale && !staleDismissed,
       dismissUpdatesPaused,
     }),
-    [notifications, watchStore, toggleWatch, doMarkAllRead, doClear, announcement, stale, staleDismissed, dismissUpdatesPaused],
+    [notifications, watchStore, toggleWatch, doMarkAllRead, doMarkRead, doDismiss, doClear, announcement],
   );
 
   return <NotificationsContext.Provider value={value}>{children}</NotificationsContext.Provider>;
