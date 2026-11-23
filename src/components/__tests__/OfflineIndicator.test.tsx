@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import { axe } from 'jest-axe';
-import { OfflineIndicator } from '../OfflineIndicator';
+import OfflineIndicatorDefault, { OfflineIndicator } from '../OfflineIndicator';
 import * as useOnlineStatusModule from '@/hooks/useOnlineStatus';
 
 jest.mock('@/hooks/useOnlineStatus');
@@ -19,6 +19,27 @@ describe('OfflineIndicator', () => {
 
       const { container } = render(<OfflineIndicator isStale={false} />);
       expect(container.firstChild).toBeNull();
+    });
+
+    it('renders nothing via default export when user is online with default props', () => {
+      mockedUseOnlineStatus.mockReturnValue(true);
+
+      const { container } = render(<OfflineIndicatorDefault />);
+      expect(container.firstChild).toBeNull();
+    });
+
+    it('renders offline status via default export when user is offline', () => {
+      mockedUseOnlineStatus.mockReturnValue(false);
+
+      render(<OfflineIndicatorDefault />);
+
+      const statusEl = screen.getByRole('status');
+      expect(statusEl).toBeInTheDocument();
+      expect(statusEl).toHaveAttribute('aria-live', 'polite');
+      expect(statusEl).toHaveAttribute('aria-label', 'You are offline');
+      expect(
+        screen.getByText('You are offline. Showing previously loaded data.'),
+      ).toBeInTheDocument();
     });
 
     it('renders offline message when user is offline', () => {
