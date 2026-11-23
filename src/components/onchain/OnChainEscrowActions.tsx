@@ -12,6 +12,7 @@ import {
 } from '@/lib/stellar/escrow';
 import { simulateSignSubmit, TxStatus } from '@/lib/stellar/submit';
 import { parseContractError } from '@/lib/stellar/errors';
+import { explorerTxUrl } from '@/lib/stellar/config';
 
 // ── Guard logic (pure, exported for tests) ───────────────────────────────────
 
@@ -84,7 +85,7 @@ function TxProgress({ status, error, txHash }: TxProgressProps) {
         Confirmed!{' '}
         {txHash && (
           <a
-            href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
+            href={explorerTxUrl(txHash)}
             target="_blank"
             rel="noopener noreferrer"
             className="alert-link"
