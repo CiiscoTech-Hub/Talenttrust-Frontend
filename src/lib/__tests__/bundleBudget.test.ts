@@ -1,186 +1,154 @@
-// ── Fixtures ─────────────────────────────────────────────────────────
-// We don't want an actual `next build` in unit tests, so we construct
-// minimal in-memory manifest fixtures and test the script's core logic
-// by extracting it as a pure function.
+import { describe, expect, it } from 'vitest';
+import {
+  BUDGET,
+  compareToBudget,
+  normalizeRoute,
+  sumRouteSizes,
+} from '../../../scripts/check-bundle-budget.mjs';
 
-// The script's manifest format (App Router shape)
-interface ManifestEntry {
-  headerFiles?: string[];
-  staticFiles?: string[];
-  dynamicFiles?: string[];
-  chunks?: string[];
-}
+describe('bundle budget utilities', () => {
+  describe('normalizeRoute', () => {
+    it('normalizes App Router and Pages Router keys to URL paths', () => {
+      expect(normalizeRoute('/page')).toBe('/');
+      expect(normalizeRoute('/index')).toBe('/');
+      expect(normalizeRoute('/contracts/page')).toBe('/contracts');
+      expect(normalizeRoute('/contracts/[id]/statement/page')).toBe(
+        '/contracts/[id]/statement',
+      );
+      expect(normalizeRoute('/docs')).toBe('/docs');
+    });
+  });
 
-type ManifestPages = Record<string, string[] | ManifestEntry>;
+  describe('sumRouteSizes', () => {
+    it('sums gzipped JS chunk sizes per route and de-duplicates shared chunks', () => {
+      const appBuildManifestFixture = {
+        polyfillFiles: ['static/chunks/polyfills.js'],
+        rootMainFiles: ['static/chunks/framework.js', 'static/chunks/main.js'],
+        pages: {
+          '/page': [
+            'static/chunks/framework.js', // duplicate of rootMainFiles
+            'static/chunks/home.js',
+            'static/chunks/home.js', // duplicate within route
+            'static/css/app.css', // non-JS asset, should be ignored
+          ],
+          '/contracts/page': [
+            'static/chunks/main.js', // duplicate of rootMainFiles
+            'static/chunks/contracts.js',
+          ],
+          '/_not-found/page': ['static/chunks/not-found.js'],
+        },
+      };
 
-interface RouteResult {
-  route: string;
-  sizeKB: number;
-  budget: number | undefined;
-  pass: boolean;
-  hasBudget: boolean;
-}
+      const chunkBytes: Record<string, number> = {
+        'static/chunks/polyfills.js': 10 * 1024,
+        'static/chunks/framework.js': 40 * 1024,
+        'static/chunks/main.js': 20 * 1024,
+        'static/chunks/home.js': 30 * 1024,
+        'static/chunks/contracts.js': 55 * 1024,
+        'static/css/app.css': 999 * 1024,
+      };
 
-/**
- * Pure-function equivalent of the budget check logic.
- * Accepts a raw manifest + budget map and returns route results.
- */
-function checkBudget(
-  pages: ManifestPages,
-  budgetMap: Record<string, number>,
-  fileSizeResolver: (path: string) => number,
-): RouteResult[] {
-  const results: RouteResult[] = [];
+      const sizes = sumRouteSizes(
+        appBuildManifestFixture,
+        '.next',
+        (chunk) => chunkBytes[chunk] ?? 0,
+      );
 
-  for (const [route, entry] of Object.entries(pages)) {
-    if (route.startsWith('/_')) continue;
-
-    const files = Array.isArray(entry)
-      ? entry
-      : [
-          ...(entry.headerFiles || []),
-          ...(entry.staticFiles || []),
-          ...(entry.dynamicFiles || []),
-          ...(Array.isArray(entry.chunks) ? entry.chunks : []),
-        ].flat();
-
-    let totalBytes = 0;
-    for (const file of files) {
-      try {
-        totalBytes += fileSizeResolver(file);
-      } catch {
-        // missing / virtual chunk — skip
-      }
-    }
-
-    const sizeKB = Math.round(totalBytes / 1024);
-    const budget = budgetMap[route];
-    const hasBudget = budget !== undefined;
-    const pass = hasBudget && sizeKB <= budget;
-
-    results.push({ route, sizeKB, budget, pass, hasBudget });
-  }
-
-  return results;
-}
-
-describe('check-bundle-budget', () => {
-  // ── Helpers ────────────────────────────────────────────────────────
-
-  /** Stub resolver that returns a fixed file size per file name. */
-  function stubResolver(sizeMap: Record<string, number>) {
-    return (filePath: string): number => {
-      for (const [needle, size] of Object.entries(sizeMap)) {
-        if (filePath.includes(needle)) return size;
-      }
-      return 0;
-    };
-  }
-
-  // ── App Router format ──────────────────────────────────────────────
-
-  it('returns pass for routes within budget (App Router format)', () => {
-    const pages: ManifestPages = {
-      '/': {
-        staticFiles: ['static/chunks/app/page-abc.js'],
-        headerFiles: [],
-        dynamicFiles: [],
-      },
-      '/dashboard': {
-        staticFiles: ['static/chunks/app/dashboard-xyz.js'],
-        headerFiles: [],
-        dynamicFiles: [],
-      },
-    };
-
-    const resolver = stubResolver({
-      'page-abc.js': 100 * 1024,        // ~100 KB
-      'dashboard-xyz.js': 250 * 1024,    // ~250 KB
+      // 10 + 40 + 20 + 30 = 100 KB (duplicates and CSS excluded)
+      expect(sizes['/']).toBe(100);
+      // 10 + 40 + 20 + 55 = 125 KB
+      expect(sizes['/contracts']).toBe(125);
+      // Internal routes starting with /_ are omitted
+      expect(sizes['/_not-found']).toBeUndefined();
     });
 
-    const results = checkBudget(pages, { '/': 200, '/dashboard': 350 }, resolver);
+    it('handles fallback build-manifest.json shape without rootMainFiles', () => {
+      const buildManifestFixture = {
+        pages: {
+          '/_app': ['static/chunks/app.js'],
+          '/': ['static/chunks/index.js'],
+          '/status': ['static/chunks/status.js'],
+        },
+      };
 
-    expect(results).toHaveLength(2);
-    expect(results.find(r => r.route === '/')!.pass).toBe(true);
-    expect(results.find(r => r.route === '/dashboard')!.pass).toBe(true);
+      const sizes = sumRouteSizes(buildManifestFixture, '.next', (chunk) =>
+        chunk.includes('index') ? 1536 : 2048,
+      );
+
+      expect(sizes['/']).toBe(1.5);
+      expect(sizes['/status']).toBe(2);
+      expect(sizes['/_app']).toBeUndefined();
+    });
   });
 
-  it('fails a route that exceeds its budget', () => {
-    const pages: ManifestPages = {
-      '/': { staticFiles: ['static/chunks/app/page-big.js'], headerFiles: [], dynamicFiles: [] },
-    };
+  describe('compareToBudget', () => {
+    it('passes when all routes are within budget', () => {
+      const { ok, results } = compareToBudget(
+        { '/': 180, '/contracts': 200 },
+        { '/': 200, '/contracts': 200 },
+      );
 
-    const resolver = stubResolver({ 'page-big.js': 500 * 1024 }); // 500 KB
-    const results = checkBudget(pages, { '/': 200 }, resolver);
-
-    expect(results).toHaveLength(1);
-    expect(results[0].pass).toBe(false);
-    expect(results[0].sizeKB).toBe(500);
-  });
-
-  it('skips routes not in the budget map (unchecked)', () => {
-    const pages: ManifestPages = {
-      '/': { staticFiles: ['static/chunks/app/page.js'], headerFiles: [], dynamicFiles: [] },
-      '/new-feature': { staticFiles: ['static/chunks/app/new-feature.js'], headerFiles: [], dynamicFiles: [] },
-    };
-
-    const resolver = stubResolver({ '.js': 100 * 1024 });
-    const results = checkBudget(pages, { '/': 200 }, resolver);
-    const unchecked = results.find(r => r.route === '/new-feature')!;
-
-    expect(unchecked.hasBudget).toBe(false);
-    expect(unchecked.pass).toBe(false); // no budget = not automatically pass
-  });
-
-  it('skips Next.js internal routes (/_app, /_error)', () => {
-    const pages: ManifestPages = {
-      '/_app': { staticFiles: ['static/chunks/app/_app.js'], headerFiles: [], dynamicFiles: [] },
-      '/': { staticFiles: ['static/chunks/app/page.js'], headerFiles: [], dynamicFiles: [] },
-    };
-
-    const resolver = stubResolver({ '.js': 50 * 1024 });
-    const results = checkBudget(pages, { '/': 200 }, resolver);
-
-    expect(results).toHaveLength(1);
-    expect(results[0].route).toBe('/');
-  });
-
-  it('tolerates missing/virtual files in the manifest (no crash)', () => {
-    const pages: ManifestPages = {
-      '/': { staticFiles: [], headerFiles: ['virtual/chunk.css'], dynamicFiles: [] },
-    };
-
-    const resolver = stubResolver({}); // nothing resolves
-    const results = checkBudget(pages, { '/': 200 }, resolver);
-
-    expect(results).toHaveLength(1);
-    expect(results[0].sizeKB).toBe(0); // missing files contributed 0
-    expect(results[0].pass).toBe(true);
-  });
-
-  it('handles Pages Router array format gracefully', () => {
-    const pages: ManifestPages = {
-      '/': ['static/chunks/pages/index-abc.js'],
-      '/about': ['static/chunks/pages/about-xyz.js'],
-    };
-
-    const resolver = stubResolver({
-      'index-abc.js': 150 * 1024,
-      'about-xyz.js': 80 * 1024,
+      expect(ok).toBe(true);
+      expect(results).toEqual([
+        { route: '/', sizeKb: 180, budgetKb: 200, overByKb: -20, status: 'PASS' },
+        {
+          route: '/contracts',
+          sizeKb: 200,
+          budgetKb: 200,
+          overByKb: 0,
+          status: 'PASS',
+        },
+      ]);
     });
 
-    const results = checkBudget(pages, { '/': 200, '/about': 100 }, resolver);
-    expect(results.every(r => r.pass)).toBe(true);
+    it('fails when any route exceeds its budget', () => {
+      const { ok, results } = compareToBudget(
+        { '/': 215.5, '/docs': 150 },
+        { '/': 200, '/docs': 200 },
+      );
+
+      expect(ok).toBe(false);
+      expect(results[0]).toEqual({
+        route: '/',
+        sizeKb: 215.5,
+        budgetKb: 200,
+        overByKb: 15.5,
+        status: 'FAIL',
+      });
+      expect(results[1].status).toBe('PASS');
+    });
+
+    it('fails with MISSING when a budgeted route is absent from the manifest', () => {
+      const { ok, results } = compareToBudget(
+        { '/': 100 },
+        { '/': 200, '/offline': 200 },
+      );
+
+      expect(ok).toBe(false);
+      expect(results[1]).toEqual({
+        route: '/offline',
+        sizeKb: null,
+        budgetKb: 200,
+        overByKb: 0,
+        status: 'MISSING',
+      });
+    });
   });
 
-  it('reports correct KB rounding', () => {
-    const pages: ManifestPages = {
-      '/': { staticFiles: ['file.js'], headerFiles: [], dynamicFiles: [] },
-    };
-
-    // 1.2 KB → rounds to 1
-    const resolver = stubResolver({ 'file.js': 1234 });
-    const [r] = checkBudget(pages, { '/': 2 }, resolver);
-    expect(r.sizeKB).toBe(1);
+  describe('BUDGET map', () => {
+    it('covers all real application routes', () => {
+      expect(Object.keys(BUDGET).sort()).toEqual(
+        [
+          '/',
+          '/contracts',
+          '/contracts/[id]/statement',
+          '/contracts/onchain/[id]',
+          '/docs',
+          '/offline',
+          '/reputation',
+          '/status',
+        ].sort(),
+      );
+    });
   });
 });

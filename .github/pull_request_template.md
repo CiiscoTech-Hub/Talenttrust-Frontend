@@ -1,53 +1,37 @@
-## Description
+## Summary
 
-<!-- Summarize the changes in this PR and the motivation behind them. -->
+<!-- What does this PR change, and why? Keep it short. -->
 
-Closes #<!-- issue number -->
+## Linked issue
 
-## Type of Change
+Closes #
 
-<!-- Check all that apply. -->
+## Type of change
 
-- [ ] Bug fix (non-breaking change that resolves an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to change)
-- [ ] Refactor (no functional change, internal code improvement)
-- [ ] Documentation update
+- [ ] Bug fix
+- [ ] New feature
+- [ ] Refactor (no behaviour change)
+- [ ] Tests only
+- [ ] Docs only
+- [ ] CI / tooling
 
----
+## How it was tested
 
-## Pre-flight Checklist
+<!-- Commands you ran and what you checked by hand. Paste relevant test output. -->
 
-All items must be checked before requesting review.
+## Accessibility / keyboard impact
 
-- [ ] `npm run lint` passes with no errors
-- [ ] `npm test` passes with no failures
-- [ ] `npm run build` completes successfully
+<!-- Does this change focus order, keyboard interaction, labels, roles, or colour contrast?
+     Write "None" if the change has no UI impact. -->
 
----
+## Screenshots
 
-## Testing & Coverage
+<!-- Before / after for visual changes. Delete this section if not applicable. -->
 
-- [ ] Module test coverage for impacted files meets or exceeds the **95% minimum threshold**
-  (run `npm test -- --coverage` and check the per-file table)
-- [ ] If this PR adds or modifies UI components, accessibility tests were written using
-  the shared utilities in `src/test-utils/a11y.tsx`
+## Checklist
 
-### What was tested?
-
-<!-- Briefly describe the test cases you added or updated, and any manual testing performed. -->
-
----
-
-## Accessibility & Security Notes
-
-### Accessibility
-
-<!-- Did you run automated a11y checks (e.g. jest-axe via src/test-utils/a11y.tsx)?
-     Did you do any manual keyboard-navigation or screen-reader testing?
-     Note findings or "N/A – no UI changes" if not applicable. -->
-
-### Security
-
-<!-- Does this PR touch authentication, authorization, wallet logic, API calls, or
-     user-supplied input? Describe any security considerations or "N/A" if not applicable. -->
+- [ ] `npm run lint` passes
+- [ ] `npm test` passes
+- [ ] `npm run build` passes
+- [ ] Docs updated where behaviour changed
+- [ ] No secrets, build output, or other generated files committed
